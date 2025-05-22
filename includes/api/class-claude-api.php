@@ -7,57 +7,67 @@ class Claude_Api {
     private $available_models = [];
 
     public function __construct() {
-        $this->api_key = get_option('claude_api_key');
+        $encrypted_key = get_option('claude_api_key');
+        $this->api_key = !empty($encrypted_key) ? 
+            \ClaudeChatPro\Includes\Security::decrypt($encrypted_key) : '';
         $this->fetch_available_models();
+    }
+
+    /**
+     * Test połączenia z API Claude
+     */
+    public function test_connection() {
+        if (empty($this->api_key)) {
+            return false;
+        }
+
+        try {
+            $response = wp_remote_post(
+                $this->api_base_url . '/messages',
+                [
+                    'headers' => [
+                        'x-api-key' => $this->api_key,
+                        'anthropic-version' => '2023-06-01',
+                        'Content-Type' => 'application/json'
+                    ],
+                    'body' => json_encode([
+                        'model' => 'claude-3-haiku-20240307',
+                        'messages' => [
+                            ['role' => 'user', 'content' => 'Test']
+                        ],
+                        'max_tokens' => 10
+                    ]),
+                    'timeout' => 15
+                ]
+            );
+
+            if (is_wp_error($response)) {
+                return false;
+            }
+
+            $status_code = wp_remote_retrieve_response_code($response);
+            return $status_code === 200;
+            
+        } catch (\Exception $e) {
+            return false;
+        }
     }
 
     /**
      * Pobieranie dostępnych modeli
      */
     public function fetch_available_models() {
-        try {
-            $response = wp_remote_get(
-                $this->api_base_url . '/models',
-                [
-                    'headers' => [
-                        'x-api-key' => $this->api_key,
-                        'anthropic-version' => '2023-06-01'
-                    ]
-                ]
-            );
+        // Ustawione domyślne modele Claude
+        $this->available_models = [
+            ['id' => 'claude-3-5-sonnet-20241022', 'name' => 'Claude 3.5 Sonnet'],
+            ['id' => 'claude-3-5-haiku-20241022', 'name' => 'Claude 3.5 Haiku'],
+            ['id' => 'claude-3-opus-20240229', 'name' => 'Claude 3 Opus'],
+            ['id' => 'claude-3-sonnet-20240229', 'name' => 'Claude 3 Sonnet'],
+            ['id' => 'claude-3-haiku-20240307', 'name' => 'Claude 3 Haiku']
+        ];
 
-            if (is_wp_error($response)) {
-                throw new \Exception($response->get_error_message());
-            }
-
-            $body = json_decode(wp_remote_retrieve_body($response), true);
-            
-            if (isset($body['models'])) {
-                $this->available_models = array_filter($body['models'], function($model) {
-                    return strpos($model['id'], 'claude') !== false;
-                });
-
-                // Zapisz modele w opcjach WordPress
-                update_option('claude_available_models', $this->available_models);
-                update_option('claude_models_last_update', current_time('mysql', true));
-            }
-
-        } catch (\Exception $e) {
-            // Jeśli nie udało się pobrać modeli, spróbuj użyć zapisanych
-            $saved_models = get_option('claude_available_models', []);
-            if (!empty($saved_models)) {
-                $this->available_models = $saved_models;
-            } else {
-                // Domyślne modele jako fallback
-                $this->available_models = [
-                    ['id' => 'claude-3-opus-20240229'],
-                    ['id' => 'claude-3-sonnet-20240229'],
-                    ['id' => 'claude-3-haiku-20240229'],
-                    ['id' => 'claude-2.1'],
-                    ['id' => 'claude-2.0'],
-                ];
-            }
-        }
+        update_option('claude_available_models', $this->available_models);
+        update_option('claude_models_last_update', current_time('mysql', true));
     }
 
     /**
@@ -111,7 +121,6 @@ class Claude_Api {
      * Pobieranie listy dostępnych modeli
      */
     public function get_available_models() {
-        // Sprawdź, czy minęło 24h od ostatniej aktualizacji
         $last_update = get_option('claude_models_last_update');
         if ($last_update) {
             $diff = strtotime(current_time('mysql', true)) - strtotime($last_update);
@@ -129,9 +138,8 @@ class Claude_Api {
     private function get_default_model() {
         $default_model = get_option('claude_default_model');
         if (!$default_model) {
-            // Użyj najnowszego dostępnego modelu
             $models = $this->get_available_models();
-            $default_model = !empty($models) ? $models[0]['id'] : 'claude-3-opus-20240229';
+            $default_model = !empty($models) ? $models[0]['id'] : 'claude-3-haiku-20240307';
         }
         return $default_model;
     }
@@ -147,7 +155,6 @@ class Claude_Api {
             ]
         ];
 
-        // Dodaj załączniki do wiadomości
         if (!empty($attachments)) {
             foreach ($attachments as $attachment) {
                 if ($attachment['type'] === 'file') {

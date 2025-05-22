@@ -8,7 +8,9 @@ class Github_Api {
     private $client_headers;
 
     public function __construct() {
-        $this->token = get_option('github_token');
+        $encrypted_token = get_option('github_token');
+        $this->token = !empty($encrypted_token) ? 
+            \ClaudeChatPro\Includes\Security::decrypt($encrypted_token) : '';
         $this->username = get_option('github_username', '');
         $this->setup_headers();
     }
@@ -28,23 +30,31 @@ class Github_Api {
      * Test połączenia z API GitHub
      */
     public function test_connection() {
+        if (empty($this->token)) {
+            return false;
+        }
+
         try {
             $response = wp_remote_get(
                 $this->api_base_url . '/user',
-                ['headers' => $this->client_headers]
+                [
+                    'headers' => $this->client_headers,
+                    'timeout' => 10
+                ]
             );
 
             if (is_wp_error($response)) {
-                throw new \Exception($response->get_error_message());
+                return false;
             }
 
-            $body = json_decode(wp_remote_retrieve_body($response), true);
-            
-            if (isset($body['login'])) {
-                // Zapisz nazwę użytkownika do wykorzystania w przyszłości
-                update_option('github_username', $body['login']);
-                $this->username = $body['login'];
-                return true;
+            $status_code = wp_remote_retrieve_response_code($response);
+            if ($status_code === 200) {
+                $body = json_decode(wp_remote_retrieve_body($response), true);
+                if (isset($body['login'])) {
+                    update_option('github_username', $body['login']);
+                    $this->username = $body['login'];
+                    return true;
+                }
             }
 
             return false;
@@ -90,7 +100,7 @@ class Github_Api {
                     'description' => $repo['description'],
                     'url' => $repo['html_url'],
                     'default_branch' => $repo['default_branch'],
-                    'visibility' => $repo['visibility'],
+                    'visibility' => $repo['visibility'] ?? ($repo['private'] ? 'private' : 'public'),
                     'updated_at' => $repo['updated_at'],
                     'language' => $repo['language'],
                     'permissions' => $repo['permissions'] ?? []
@@ -146,50 +156,6 @@ class Github_Api {
     }
 
     /**
-     * Wyszukiwanie plików w repozytorium
-     */
-    public function search_code($query, $repo = null) {
-        try {
-            $search_query = $query;
-            if ($repo) {
-                $search_query .= " repo:{$repo}";
-            }
-
-            $response = wp_remote_get(
-                $this->api_base_url . '/search/code?q=' . urlencode($search_query),
-                ['headers' => $this->client_headers]
-            );
-
-            if (is_wp_error($response)) {
-                throw new \Exception($response->get_error_message());
-            }
-
-            $body = json_decode(wp_remote_retrieve_body($response), true);
-
-            if (!isset($body['items'])) {
-                return [];
-            }
-
-            return array_map(function($item) {
-                return [
-                    'name' => $item['name'],
-                    'path' => $item['path'],
-                    'repository' => $item['repository']['full_name'],
-                    'url' => $item['html_url']
-                ];
-            }, $body['items']);
-
-        } catch (\Exception $e) {
-            throw new \Exception(
-                sprintf(
-                    __('Błąd podczas wyszukiwania kodu: %s', 'claude-chat-pro'),
-                    $e->getMessage()
-                )
-            );
-        }
-    }
-
-    /**
      * Pobieranie struktury katalogu w repozytorium
      */
     public function get_repository_tree($repo, $path = '', $ref = null) {
@@ -235,146 +201,10 @@ class Github_Api {
     }
 
     /**
-     * Pobieranie informacji o gałęziach repozytorium
+     * Sprawdzenie czy token jest skonfigurowany
      */
-    public function get_repository_branches($repo) {
-        try {
-            $response = wp_remote_get(
-                $this->api_base_url . "/repos/{$repo}/branches",
-                ['headers' => $this->client_headers]
-            );
-
-            if (is_wp_error($response)) {
-                throw new \Exception($response->get_error_message());
-            }
-
-            $branches = json_decode(wp_remote_retrieve_body($response), true);
-
-            if (!is_array($branches)) {
-                throw new \Exception(__('Nieprawidłowa odpowiedź z API GitHub', 'claude-chat-pro'));
-            }
-
-            return array_map(function($branch) {
-                return [
-                    'name' => $branch['name'],
-                    'commit' => [
-                        'sha' => $branch['commit']['sha'],
-                        'url' => $branch['commit']['url']
-                    ]
-                ];
-            }, $branches);
-
-        } catch (\Exception $e) {
-            throw new \Exception(
-                sprintf(
-                    __('Błąd podczas pobierania gałęzi: %s', 'claude-chat-pro'),
-                    $e->getMessage()
-                )
-            );
-        }
-    }
-
-    /**
-     * Pobieranie historii zmian dla pliku
-     */
-    public function get_file_history($repo, $path, $params = []) {
-        $default_params = [
-            'path' => $path,
-            'per_page' => 10
-        ];
-
-        $params = array_merge($default_params, $params);
-        $query = http_build_query($params);
-
-        try {
-            $response = wp_remote_get(
-                $this->api_base_url . "/repos/{$repo}/commits?{$query}",
-                ['headers' => $this->client_headers]
-            );
-
-            if (is_wp_error($response)) {
-                throw new \Exception($response->get_error_message());
-            }
-
-            $commits = json_decode(wp_remote_retrieve_body($response), true);
-
-            if (!is_array($commits)) {
-                throw new \Exception(__('Nieprawidłowa odpowiedź z API GitHub', 'claude-chat-pro'));
-            }
-
-            return array_map(function($commit) {
-                return [
-                    'sha' => $commit['sha'],
-                    'message' => $commit['commit']['message'],
-                    'author' => [
-                        'name' => $commit['commit']['author']['name'],
-                        'email' => $commit['commit']['author']['email'],
-                        'date' => $commit['commit']['author']['date']
-                    ],
-                    'url' => $commit['html_url']
-                ];
-            }, $commits);
-
-        } catch (\Exception $e) {
-            throw new \Exception(
-                sprintf(
-                    __('Błąd podczas pobierania historii pliku: %s', 'claude-chat-pro'),
-                    $e->getMessage()
-                )
-            );
-        }
-    }
-
-    /**
-     * Sprawdzanie limitów API
-     */
-    public function get_rate_limit() {
-        try {
-            $response = wp_remote_get(
-                $this->api_base_url . '/rate_limit',
-                ['headers' => $this->client_headers]
-            );
-
-            if (is_wp_error($response)) {
-                throw new \Exception($response->get_error_message());
-            }
-
-            return json_decode(wp_remote_retrieve_body($response), true);
-
-        } catch (\Exception $e) {
-            throw new \Exception(
-                sprintf(
-                    __('Błąd podczas sprawdzania limitów API: %s', 'claude-chat-pro'),
-                    $e->getMessage()
-                )
-            );
-        }
-    }
-
-    /**
-     * Pobieranie języków używanych w repozytorium
-     */
-    public function get_repository_languages($repo) {
-        try {
-            $response = wp_remote_get(
-                $this->api_base_url . "/repos/{$repo}/languages",
-                ['headers' => $this->client_headers]
-            );
-
-            if (is_wp_error($response)) {
-                throw new \Exception($response->get_error_message());
-            }
-
-            return json_decode(wp_remote_retrieve_body($response), true);
-
-        } catch (\Exception $e) {
-            throw new \Exception(
-                sprintf(
-                    __('Błąd podczas pobierania języków: %s', 'claude-chat-pro'),
-                    $e->getMessage()
-                )
-            );
-        }
+    public function is_configured() {
+        return !empty($this->token);
     }
 
     /**
@@ -382,12 +212,5 @@ class Github_Api {
      */
     public function get_username() {
         return $this->username;
-    }
-
-    /**
-     * Sprawdzenie czy token jest skonfigurowany
-     */
-    public function is_configured() {
-        return !empty($this->token);
     }
 }
