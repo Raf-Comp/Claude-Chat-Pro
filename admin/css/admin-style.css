@@ -1,0 +1,51 @@
+/* Główne style admina */
+.claude-chat-interface {
+    max-width: 1200px;
+    margin: 20px auto;
+    padding: 20px;
+}
+
+/* Style formularzy */
+.form-table td {
+    padding: 15px 10px;
+}
+
+.form-table th {
+    padding: 20px 10px 20px 0;
+}
+
+/* Style przycisków */
+.button.toggle-password {
+    vertical-align: middle;
+    margin-left: 5px;
+}
+
+/* Status API */
+.api-status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+    margin: 20px 0;
+}
+
+.status-card {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    padding: 15px;
+    border-radius: 4px;
+}
+
+.status-card.success {
+    border-left: 4px solid #46b450;
+}
+
+.status-card.error {
+    border-left: 4px solid #dc3232;
+}
+
+/* Responsywność */
+@media screen and (max-width: 782px) {
+    .api-status-grid {
+        grid-template-columns: 1fr;
+    }
+}
