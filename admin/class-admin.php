@@ -102,106 +102,106 @@ class Admin {
     }
 
     /**
-     * Ładowanie assetów
-     */
-    public function enqueue_assets($hook) {
-        if (strpos($hook, 'claude-chat') === false) {
-            return;
-        }
+ * Ładowanie assetów
+ */
+public function enqueue_assets($hook) {
+    if (strpos($hook, 'claude-chat') === false) {
+        return;
+    }
 
-        // Podstawowe style
+    // Podstawowe style
+    wp_enqueue_style(
+        $this->plugin_name,
+        CLAUDE_CHAT_PRO_PLUGIN_URL . 'admin/css/admin-style.css',
+        [],
+        $this->version
+    );
+
+    // Style diagnostyki
+    if (strpos($hook, 'claude-chat-diagnostics') !== false) {
         wp_enqueue_style(
-            $this->plugin_name,
-            CLAUDE_CHAT_PRO_PLUGIN_URL . 'admin/css/admin-style.css',
+            'claude-chat-diagnostics',
+            CLAUDE_CHAT_PRO_PLUGIN_URL . 'admin/css/diagnostics.css',
             [],
             $this->version
         );
+    }
 
-        // Style diagnostyki
-        if (strpos($hook, 'claude-chat-diagnostics') !== false) {
-            wp_enqueue_style(
-                'claude-chat-diagnostics',
-                CLAUDE_CHAT_PRO_PLUGIN_URL . 'admin/css/diagnostics.css',
-                [],
-                $this->version
-            );
-        }
-
-        // Enhanced diagnostics script
-        if (strpos($hook, 'claude-chat-diagnostics') !== false) {
-            wp_enqueue_script(
-                'claude-chat-diagnostics-enhanced',
-                CLAUDE_CHAT_PRO_PLUGIN_URL . 'admin/js/diagnostics-enhanced.js',
-                ['claude-chat-diagnostics'],
-                $this->version,
-                true
-    );
-
-
-        // Highlight.js
-        wp_enqueue_style(
-            'highlight-js',
-            'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css',
-            [],
-            '11.9.0'
-        );
-
+    // Enhanced diagnostics script
+    if (strpos($hook, 'claude-chat-diagnostics') !== false) {
         wp_enqueue_script(
-            'highlight-js',
-            'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js',
-            [],
-            '11.9.0',
+            'claude-chat-diagnostics-enhanced',
+            CLAUDE_CHAT_PRO_PLUGIN_URL . 'admin/js/diagnostics-enhanced.js',
+            ['claude-chat-diagnostics'],
+            $this->version,
             true
         );
+    } // <-- Brakowało tego zamykającego nawiasu
 
-        // Podstawowy admin script
+    // Highlight.js
+    wp_enqueue_style(
+        'highlight-js',
+        'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css',
+        [],
+        '11.9.0'
+    );
+
+    wp_enqueue_script(
+        'highlight-js',
+        'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js',
+        [],
+        '11.9.0',
+        true
+    );
+
+    // Podstawowy admin script
+    wp_enqueue_script(
+        $this->plugin_name,
+        CLAUDE_CHAT_PRO_PLUGIN_URL . 'admin/js/admin-script.js',
+        ['jquery', 'highlight-js'],
+        $this->version,
+        true
+    );
+
+    // Script diagnostyki
+    if (strpos($hook, 'claude-chat-diagnostics') !== false) {
         wp_enqueue_script(
-            $this->plugin_name,
-            CLAUDE_CHAT_PRO_PLUGIN_URL . 'admin/js/admin-script.js',
+            'claude-chat-diagnostics',
+            CLAUDE_CHAT_PRO_PLUGIN_URL . 'admin/js/diagnostics.js',
+            ['jquery'],
+            $this->version,
+            true
+        );
+    }
+
+    // Chat interface script
+    if (strpos($hook, 'claude-chat-pro') !== false && !strpos($hook, 'settings') && !strpos($hook, 'diagnostics') && !strpos($hook, 'history') && !strpos($hook, 'repositories')) {
+        wp_enqueue_script(
+            'claude-chat-interface',
+            CLAUDE_CHAT_PRO_PLUGIN_URL . 'admin/js/chat-interface.js',
             ['jquery', 'highlight-js'],
             $this->version,
             true
         );
-
-        // Script diagnostyki
-        if (strpos($hook, 'claude-chat-diagnostics') !== false) {
-            wp_enqueue_script(
-                'claude-chat-diagnostics',
-                CLAUDE_CHAT_PRO_PLUGIN_URL . 'admin/js/diagnostics.js',
-                ['jquery'],
-                $this->version,
-                true
-            );
-        }
-
-        // Chat interface script
-        if (strpos($hook, 'claude-chat-pro') !== false && !strpos($hook, 'settings') && !strpos($hook, 'diagnostics') && !strpos($hook, 'history') && !strpos($hook, 'repositories')) {
-            wp_enqueue_script(
-                'claude-chat-interface',
-                CLAUDE_CHAT_PRO_PLUGIN_URL . 'admin/js/chat-interface.js',
-                ['jquery', 'highlight-js'],
-                $this->version,
-                true
-            );
-        }
-
-        // Lokalizacja dla JavaScript
-        wp_localize_script($this->plugin_name, 'claudeChatPro', [
-            'ajaxUrl' => admin_url('admin-ajax.php'),
-            'nonce' => wp_create_nonce('claude-chat-pro-nonce'),
-            'currentUser' => wp_get_current_user()->user_login,
-            'currentTimeUTC' => current_time('mysql', true),
-            'pluginVersion' => $this->version,
-            'strings' => [
-                'error' => __('Wystąpił błąd!', 'claude-chat-pro'),
-                'success' => __('Operacja zakończona sukcesem!', 'claude-chat-pro'),
-                'loading' => __('Ładowanie...', 'claude-chat-pro'),
-                'confirm' => __('Czy jesteś pewien?', 'claude-chat-pro'),
-                'cancel' => __('Anuluj', 'claude-chat-pro'),
-                'save' => __('Zapisz', 'claude-chat-pro')
-            ]
-        ]);
     }
+
+    // Lokalizacja dla JavaScript
+    wp_localize_script($this->plugin_name, 'claudeChatPro', [
+        'ajaxUrl' => admin_url('admin-ajax.php'),
+        'nonce' => wp_create_nonce('claude-chat-pro-nonce'),
+        'currentUser' => wp_get_current_user()->user_login,
+        'currentTimeUTC' => current_time('mysql', true),
+        'pluginVersion' => $this->version,
+        'strings' => [
+            'error' => __('Wystąpił błąd!', 'claude-chat-pro'),
+            'success' => __('Operacja zakończona sukcesem!', 'claude-chat-pro'),
+            'loading' => __('Ładowanie...', 'claude-chat-pro'),
+            'confirm' => __('Czy jesteś pewien?', 'claude-chat-pro'),
+            'cancel' => __('Anuluj', 'claude-chat-pro'),
+            'save' => __('Zapisz', 'claude-chat-pro')
+        ]
+    ]);
+}
 
     /**
      * Renderowanie stron
