@@ -29,39 +29,47 @@ $github_api_configured = !empty(get_option('github_token'));
     <div class="chat-container">
         <!-- Panel boczny z repozytoriami -->
         <div class="repo-sidebar">
-            <h3><?php _e('Repozytoria GitHub', 'claude-chat-pro'); ?></h3>
-            
-            <?php if (!$github_api_configured): ?>
-                <div class="notice notice-info inline">
-                    <p><?php _e('GitHub API nie jest skonfigurowane', 'claude-chat-pro'); ?></p>
-                </div>
-            <?php else: ?>
-                <div class="repo-search">
-                    <input type="text" 
-                           id="repo-search" 
-                           placeholder="<?php _e('Szukaj repozytoriów...', 'claude-chat-pro'); ?>"
-                           class="regular-text">
-                </div>
-                <div id="repo-list" class="repo-list">
-                    <div class="loading-repos">
-                        <div class="spinner"></div>
-                        <p><?php _e('Ładowanie repozytoriów...', 'claude-chat-pro'); ?></p>
-                    </div>
-                </div>
-            <?php endif; ?>
+            <div class="repo-header">
+                <h3>Repozytoria</h3>
+            </div>
+            <div class="repo-list">
+                <?php
+                $repositories = get_option('claude_chat_repositories', array());
+                if (!empty($repositories)) {
+                    foreach ($repositories as $repo) {
+                        printf(
+                            '<div class="repo-item" data-repo-id="%s">
+                                <span class="repo-name">%s</span>
+                                <span class="repo-path">%s</span>
+                            </div>',
+                            esc_attr($repo['id']),
+                            esc_html($repo['name']),
+                            esc_html($repo['path'])
+                        );
+                    }
+                } else {
+                    echo '<div class="no-repos">Brak dodanych repozytoriów</div>';
+                }
+                ?>
+            </div>
         </div>
 
         <!-- Główny panel czatu -->
         <div class="chat-main">
-            <!-- Historia konwersacji -->
-            <div id="chat-messages" class="chat-messages">
+            <!-- Nagłówek czatu -->
+            <div class="chat-header">
+                <h2>Czat z Asystentem</h2>
+            </div>
+
+            <!-- Panel wiadomości -->
+            <div class="chat-messages">
                 <div class="welcome-message">
                     <h2><?php _e('Witaj', 'claude-chat-pro'); ?> <?php echo esc_html($current_user->display_name); ?>!</h2>
                     <p><?php _e('Rozpocznij rozmowę z Claude AI. Możesz:', 'claude-chat-pro'); ?></p>
                     <ul>
                         <li><?php _e('Zadawać pytania i otrzymywać odpowiedzi', 'claude-chat-pro'); ?></li>
                         <li><?php _e('Załączać pliki do analizy', 'claude-chat-pro'); ?></li>
-                        <li><?php _e('Wybierać fragmenty kodu z repozytoriów GitHub', 'claude-chat-pro'); ?></li>
+                        <li><?php _e('Wybierać fragmenty kodu z repozytoriów', 'claude-chat-pro'); ?></li>
                         <li><?php _e('Eksportować odpowiedzi do plików', 'claude-chat-pro'); ?></li>
                     </ul>
                     
@@ -78,23 +86,15 @@ $github_api_configured = !empty(get_option('github_token'));
             <div class="chat-input-panel">
                 <!-- Przyciski akcji -->
                 <div class="action-buttons">
-                    <button type="button" 
-                            id="attach-file" 
-                            class="button"
-                            title="<?php _e('Załącz plik tekstowy (maks. 1MB)', 'claude-chat-pro'); ?>">
+                    <button type="button" id="add-repo-button" class="add-repo-button">
+                        <span class="dashicons dashicons-database"></span>
+                        Dodaj repozytorium
+                    </button>
+                    <button type="button" id="upload-button">
                         <span class="dashicons dashicons-upload"></span>
-                        <?php _e('Załącz plik', 'claude-chat-pro'); ?>
+                        Załącz plik
                     </button>
-                    
-                    <button type="button" 
-                            id="attach-repo" 
-                            class="button"
-                            <?php echo !$github_api_configured ? 'disabled' : ''; ?>
-                            title="<?php _e('Załącz kod z repozytorium GitHub', 'claude-chat-pro'); ?>">
-                        <span class="dashicons dashicons-github"></span>
-                        <?php _e('Kod z GitHub', 'claude-chat-pro'); ?>
-                    </button>
-                    
+                    <input type="file" id="file-upload" multiple accept=".txt,.js,.php,.css,.html,.json" style="display: none;">
                     <button type="button" 
                             id="clear-chat" 
                             class="button"
@@ -102,14 +102,19 @@ $github_api_configured = !empty(get_option('github_token'));
                         <span class="dashicons dashicons-trash"></span>
                         <?php _e('Wyczyść', 'claude-chat-pro'); ?>
                     </button>
+                    <label class="dark-mode-toggle">
+                        <input type="checkbox" id="dark-mode-toggle">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">Tryb ciemny</span>
+                    </label>
                 </div>
 
                 <!-- Lista załączników -->
-                <div id="attachments-list" class="attachments-list"></div>
+                <div class="attachments-list"></div>
 
                 <!-- Pole wprowadzania -->
                 <div class="input-container">
-                    <textarea id="chat-input" 
+                    <textarea id="message-input" 
                               placeholder="<?php _e('Napisz wiadomość...', 'claude-chat-pro'); ?>"
                               rows="3"
                               <?php echo !$claude_api_configured ? 'disabled' : ''; ?>></textarea>
@@ -118,13 +123,13 @@ $github_api_configured = !empty(get_option('github_token'));
                             class="button button-primary"
                             <?php echo !$claude_api_configured ? 'disabled' : ''; ?>
                             title="<?php _e('Wyślij wiadomość (Enter)', 'claude-chat-pro'); ?>">
-                        <span class="dashicons dashicons-send"></span>
+                        <span class="dashicons dashicons-arrow-right-alt"></span>
                     </button>
                 </div>
                 
                 <div class="input-help">
                     <small>
-                        <?php _e('Naciśnij Enter aby wysłać, Shift+Enter dla nowej linii. Obsługiwane formaty plików: txt, md, js, php, css, html, json, xml, py, java, cpp, c, cs, rb, go, rs, sql', 'claude-chat-pro'); ?>
+                        <?php _e('Naciśnij Enter aby wysłać, Shift+Enter dla nowej linii. Obsługiwane formaty plików: txt, md, js, php, css, html, json', 'claude-chat-pro'); ?>
                     </small>
                 </div>
             </div>
@@ -132,37 +137,17 @@ $github_api_configured = !empty(get_option('github_token'));
     </div>
 </div>
 
-<!-- Template dla wiadomości -->
-<template id="message-template">
-    <div class="chat-message">
-        <div class="message-header">
-            <span class="message-author"></span>
-            <span class="message-time"></span>
-        </div>
-        <div class="message-content"></div>
-        <div class="message-actions">
-            <button type="button" class="button-link save-message" title="<?php _e('Zapisz wiadomość', 'claude-chat-pro'); ?>">
-                <span class="dashicons dashicons-download"></span>
-            </button>
-        </div>
+<!-- Szablony dla dynamicznych elementów -->
+<template id="typing-indicator-template">
+    <div class="typing-indicator">
+        <div class="spinner"></div>
+        <span>Asystent pisze...</span>
     </div>
 </template>
 
-<!-- Template dla bloku kodu -->
-<template id="code-block-template">
-    <div class="code-block">
-        <div class="code-header">
-            <span class="code-language"></span>
-            <div class="code-actions">
-                <button type="button" class="button copy-code" title="<?php _e('Kopiuj kod', 'claude-chat-pro'); ?>">
-                    <span class="dashicons dashicons-clipboard"></span>
-                </button>
-                <button type="button" class="button download-code" title="<?php _e('Pobierz kod', 'claude-chat-pro'); ?>">
-                    <span class="dashicons dashicons-download"></span>
-                </button>
-            </div>
-        </div>
-        <pre><code></code></pre>
+<template id="notification-template">
+    <div class="notification">
+        <span class="notification-message"></span>
     </div>
 </template>
 
@@ -170,14 +155,22 @@ $github_api_configured = !empty(get_option('github_token'));
 // Przekaż dane do JavaScript
 window.claudeChatConfig = {
     apiConfigured: <?php echo $claude_api_configured ? 'true' : 'false'; ?>,
-    githubConfigured: <?php echo $github_api_configured ? 'true' : 'false'; ?>,
     maxFileSize: <?php echo wp_max_upload_size(); ?>,
     strings: {
         errorApiNotConfigured: '<?php echo esc_js(__('Skonfiguruj najpierw klucz API Claude w ustawieniach', 'claude-chat-pro')); ?>',
         errorFileTooLarge: '<?php echo esc_js(__('Plik jest za duży. Maksymalny rozmiar:', 'claude-chat-pro')); ?>',
         errorFileRead: '<?php echo esc_js(__('Nie udało się odczytać pliku', 'claude-chat-pro')); ?>',
-        confirmClearChat: '<?php echo esc_js(__('Czy na pewno chcesz wyczyścić historię czatu?', 'claude-chat-pro')); ?>',
-        githubNotConfigured: '<?php echo esc_js(__('GitHub API nie jest skonfigurowane', 'claude-chat-pro')); ?>'
+        confirmClearChat: '<?php echo esc_js(__('Czy na pewno chcesz wyczyścić historię czatu?', 'claude-chat-pro')); ?>'
+    }
+};
+
+var claudeChatPro = {
+    ajaxurl: '<?php echo admin_url('admin-ajax.php'); ?>',
+    nonce: '<?php echo wp_create_nonce('claude_chat_nonce'); ?>',
+    i18n: {
+        sendError: '<?php echo esc_js(__('Wystąpił błąd podczas wysyłania wiadomości.', 'claude-chat-pro')); ?>',
+        invalidFile: '<?php echo esc_js(__('Nieprawidłowy typ pliku.', 'claude-chat-pro')); ?>',
+        maxFileSize: '<?php echo esc_js(__('Plik jest zbyt duży. Maksymalny rozmiar to 5MB.', 'claude-chat-pro')); ?>'
     }
 };
 </script>

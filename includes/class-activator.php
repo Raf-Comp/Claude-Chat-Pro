@@ -8,6 +8,7 @@ class Activator {
     public static function activate() {
         self::create_database_tables();
         self::set_default_options();
+        \ClaudeChatPro\Includes\Database\Settings_DB::create_table();
     }
 
     /**

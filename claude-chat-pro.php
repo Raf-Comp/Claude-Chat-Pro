@@ -23,6 +23,11 @@ define('CLAUDE_CHAT_PRO_VERSION', '1.0.0');
 define('CLAUDE_CHAT_PRO_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('CLAUDE_CHAT_PRO_PLUGIN_URL', plugin_dir_url(__FILE__));
 
+// Bezpieczny klucz szyfrowania dla API keys
+if (!defined('CLAUDE_CHAT_PRO_ENCRYPTION_KEY')) {
+    define('CLAUDE_CHAT_PRO_ENCRYPTION_KEY', 'claude_chat_pro_secure_key_' . md5(ABSPATH));
+}
+
 // Autoloader
 spl_autoload_register(function ($class) {
     if (strpos($class, 'ClaudeChatPro\\') !== 0) {
@@ -43,9 +48,15 @@ spl_autoload_register(function ($class) {
     }
 });
 
+// Ładuj klasę instalatora bazy danych, aby była dostępna przy aktywacji
+require_once CLAUDE_CHAT_PRO_PLUGIN_DIR . 'includes/class-installer.php';
+
 // Aktywacja i dezaktywacja wtyczki
 register_activation_hook(__FILE__, ['ClaudeChatPro\Includes\Activator', 'activate']);
 register_deactivation_hook(__FILE__, ['ClaudeChatPro\Includes\Deactivator', 'deactivate']);
+
+// Dodaj aktywator bazy danych
+register_activation_hook(__FILE__, ['\ClaudeChatPro\Includes\Claude_Installer', 'activate']);
 
 // Inicjalizacja wtyczki
 add_action('plugins_loaded', function() {
@@ -57,6 +68,11 @@ add_action('plugins_loaded', function() {
         });
         return;
     }
+
+    // Dodaj Font Awesome
+    add_action('admin_enqueue_scripts', function() {
+        wp_enqueue_style('font-awesome', 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css', [], '6.5.1');
+    });
 
     new ClaudeChatPro\Includes\Core();
 });

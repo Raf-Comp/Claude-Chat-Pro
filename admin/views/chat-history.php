@@ -37,147 +37,67 @@ $history = $chat_history->search_history([
 ?>
 
 <div class="wrap">
-    <h1><?php _e('Historia rozmów', 'claude-chat-pro'); ?></h1>
-
-    <!-- Formularz wyszukiwania -->
-    <div class="tablenav top">
-        <form method="get" class="search-form">
-            <input type="hidden" name="page" value="claude-chat-history">
-            
-            <div class="alignleft actions">
-                <input type="text" 
-                       name="search" 
-                       value="<?php echo esc_attr($search); ?>" 
-                       placeholder="<?php _e('Szukaj w historii...', 'claude-chat-pro'); ?>"
-                       class="regular-text">
-                
-                <input type="date" 
-                       name="date_from" 
-                       value="<?php echo esc_attr($date_from); ?>"
-                       class="date-input"
-                       placeholder="<?php _e('Od', 'claude-chat-pro'); ?>">
-                
-                <input type="date" 
-                       name="date_to" 
-                       value="<?php echo esc_attr($date_to); ?>"
-                       class="date-input"
-                       placeholder="<?php _e('Do', 'claude-chat-pro'); ?>">
-                
-                <input type="submit" 
-                       class="button" 
-                       value="<?php _e('Filtruj', 'claude-chat-pro'); ?>">
+    <div class="chat-history-container">
+        <div class="chat-history-header">
+            <h1 class="chat-history-title">Historia czatu</h1>
+            <div class="dark-mode-toggle">
+                <label class="switch">
+                    <input type="checkbox" id="dark-mode-toggle">
+                    <span class="slider round"></span>
+                </label>
+                <span class="dark-mode-label">Tryb ciemny</span>
             </div>
-        </form>
-
-        <!-- Eksport do CSV -->
-        <div class="alignright">
-            <form method="post" class="export-form">
-                <?php wp_nonce_field('claude_chat_export_csv'); ?>
-                <input type="hidden" name="search" value="<?php echo esc_attr($search); ?>">
-                <input type="hidden" name="date_from" value="<?php echo esc_attr($date_from); ?>">
-                <input type="hidden" name="date_to" value="<?php echo esc_attr($date_to); ?>">
-                <input type="submit" 
-                       name="export_csv" 
-                       class="button" 
-                       value="<?php _e('Eksportuj do CSV', 'claude-chat-pro'); ?>">
-            </form>
         </div>
-        <br class="clear">
-    </div>
 
-    <!-- Tabela z historią -->
-    <table class="wp-list-table widefat fixed striped">
-        <thead>
-            <tr>
-                <th scope="col"><?php _e('Data (UTC)', 'claude-chat-pro'); ?></th>
-                <th scope="col"><?php _e('Użytkownik', 'claude-chat-pro'); ?></th>
-                <th scope="col"><?php _e('Typ', 'claude-chat-pro'); ?></th>
-                <th scope="col"><?php _e('Treść', 'claude-chat-pro'); ?></th>
-                <th scope="col"><?php _e('Załączniki', 'claude-chat-pro'); ?></th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php if (empty($history['items'])): ?>
-                <tr>
-                    <td colspan="5"><?php _e('Brak wyników.', 'claude-chat-pro'); ?></td>
-                </tr>
-            <?php else: ?>
-                <?php foreach ($history['items'] as $item): ?>
-                    <tr>
-                        <td><?php echo esc_html($item['created_at']); ?></td>
-                        <td>
-                            <?php 
-                            $user_info = get_userdata($item['user_id']);
-                            echo esc_html($user_info ? $user_info->user_login : 'N/A');
-                            ?>
-                        </td>
-                        <td><?php echo esc_html($item['message_type']); ?></td>
-                        <td>
-                            <?php
-                            // Wyświetl pierwsze 100 znaków treści
-                            $content = wp_trim_words($item['message_content'], 20, '...');
-                            echo esc_html($content);
-                            ?>
-                            <?php if (strlen($item['message_content']) > strlen($content)): ?>
-                                <button type="button" 
-                                        class="button-link show-full-content" 
-                                        data-full-content="<?php echo esc_attr($item['message_content']); ?>">
-                                    <?php _e('Pokaż więcej', 'claude-chat-pro'); ?>
-                                </button>
-                            <?php endif; ?>
-                        </td>
-                        <td>
-                            <?php
-                            $attachments = [];
-                            if (!empty($item['files_data'])) {
-                                $files = is_string($item['files_data']) ? 
-                                    json_decode($item['files_data'], true) : 
-                                    $item['files_data'];
-                                if (is_array($files)) {
-                                    foreach ($files as $file) {
-                                        $attachments[] = esc_html($file['name']);
-                                    }
-                                }
-                            }
-                            if (!empty($item['github_data'])) {
-                                $github_data = is_string($item['github_data']) ? 
-                                    json_decode($item['github_data'], true) : 
-                                    $item['github_data'];
-                                if (is_array($github_data)) {
-                                    foreach ($github_data as $data) {
-                                        $attachments[] = sprintf(
-                                            'GitHub: %s',
-                                            esc_html($data['path'])
-                                        );
-                                    }
-                                }
-                            }
-                            echo implode('<br>', $attachments);
-                            ?>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
+        <div class="chat-history-filters">
+            <div class="chat-history-search">
+                <input type="text" placeholder="Szukaj w historii..." aria-label="Szukaj w historii">
+            </div>
+            <div class="chat-history-date-filter">
+                <input type="date" id="start-date" aria-label="Data początkowa">
+                <span>do</span>
+                <input type="date" id="end-date" aria-label="Data końcowa">
+            </div>
+        </div>
+
+        <div class="chat-history-list">
+            <?php
+            if (!empty($history['items'])) :
+                foreach ($history['items'] as $item) :
+                    $chat_id = $item['id'];
+                    $chat_title = $item['title'];
+                    $chat_date = $item['date'];
+                    $chat_content = $item['content'];
+            ?>
+                <div class="chat-history-item" data-chat-id="<?php echo esc_attr($chat_id); ?>" data-date="<?php echo esc_attr($chat_date); ?>">
+                    <div class="chat-history-item-header">
+                        <h2 class="chat-history-item-title"><?php echo esc_html($chat_title); ?></h2>
+                        <span class="chat-history-item-date"><?php echo esc_html($chat_date); ?></span>
+                    </div>
+                    <div class="chat-history-item-content">
+                        <?php echo wp_kses_post($chat_content); ?>
+                    </div>
+                    <div class="chat-history-item-actions">
+                        <button type="button" class="chat-history-button view-button">
+                            <span class="dashicons dashicons-visibility"></span>
+                            Podgląd
+                        </button>
+                        <button type="button" class="chat-history-button delete-button">
+                            <span class="dashicons dashicons-trash"></span>
+                            Usuń
+                        </button>
+                    </div>
+                </div>
+            <?php
+                endforeach;
+            else :
+            ?>
+                <div class="chat-history-empty">
+                    <p>Brak historii czatu do wyświetlenia.</p>
+                </div>
             <?php endif; ?>
-        </tbody>
-    </table>
-
-    <!-- Paginacja -->
-    <?php if ($history['pages'] > 1): ?>
-        <div class="tablenav bottom">
-            <div class="tablenav-pages">
-                <?php
-                echo paginate_links([
-                    'base' => add_query_arg('paged', '%#%'),
-                    'format' => '',
-                    'prev_text' => __('&laquo;'),
-                    'next_text' => __('&raquo;'),
-                    'total' => $history['pages'],
-                    'current' => $page
-                ]);
-                ?>
-            </div>
         </div>
-    <?php endif; ?>
+    </div>
 </div>
 
 <!-- Modal z pełną treścią wiadomości -->

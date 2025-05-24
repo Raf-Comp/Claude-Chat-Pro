@@ -72,7 +72,10 @@ class Security {
         $cipher = "aes-256-cbc";
         $ivlen = openssl_cipher_iv_length($cipher);
         $iv = openssl_random_pseudo_bytes($ivlen);
-        $key = wp_salt('auth');
+        
+        $key = defined('CLAUDE_CHAT_PRO_ENCRYPTION_KEY') ? 
+            CLAUDE_CHAT_PRO_ENCRYPTION_KEY : 
+            wp_salt('auth');
         
         $encrypted = openssl_encrypt($value, $cipher, $key, 0, $iv);
         if ($encrypted === false) {
@@ -96,7 +99,10 @@ class Security {
 
         $cipher = "aes-256-cbc";
         $ivlen = openssl_cipher_iv_length($cipher);
-        $key = wp_salt('auth');
+        
+        $key = defined('CLAUDE_CHAT_PRO_ENCRYPTION_KEY') ? 
+            CLAUDE_CHAT_PRO_ENCRYPTION_KEY : 
+            wp_salt('auth');
         
         $decoded = base64_decode($encrypted_value);
         if (strlen($decoded) < $ivlen) {
@@ -118,14 +124,37 @@ class Security {
      * Walidacja klucza API
      */
     public static function validate_api_key($key) {
-        return !empty($key) && preg_match('/^[a-zA-Z0-9_-]+$/', $key);
+        if (empty($key)) {
+            return false;
+        }
+        
+        // Klucz API Claude powinien być długim ciągiem znaków
+        if (strlen($key) < 20) {
+            return false;
+        }
+        
+        // Sprawdź czy klucz zawiera tylko dozwolone znaki
+        if (!preg_match('/^[a-zA-Z0-9_-]+$/', $key)) {
+            return false;
+        }
+        
+        return true;
     }
 
     /**
      * Sprawdzanie poprawności tokenu GitHub
      */
     public static function validate_github_token($token) {
-        return !empty($token) && preg_match('/^gh[ps]_[a-zA-Z0-9_]+$/', $token);
+        if (empty($token)) {
+            return false;
+        }
+        
+        // Token GitHub powinien zaczynać się od ghp_ lub ghs_
+        if (!preg_match('/^gh[ps]_[a-zA-Z0-9_]+$/', $token)) {
+            return false;
+        }
+        
+        return true;
     }
 
     /**

@@ -1,103 +1,50 @@
 <?php
 namespace ClaudeChatPro\Includes\Api;
 
+use ClaudeChatPro\Includes\Database\Settings_DB;
+
 class Claude_Api {
     private $api_key;
-    private $api_base_url = 'https://api.anthropic.com/v1';
-    private $available_models = [];
+    private $api_url = 'https://api.anthropic.com/v1/messages';
+    private $api_version = '2023-06-01';
 
     public function __construct() {
-        $encrypted_key = get_option('claude_api_key');
+        $encrypted_key = Settings_DB::get('claude_api_key', '');
         $this->api_key = !empty($encrypted_key) ? 
             \ClaudeChatPro\Includes\Security::decrypt($encrypted_key) : '';
-        $this->fetch_available_models();
     }
 
     /**
-     * Test połączenia z API Claude
+     * Wysyła wiadomość do API Claude
+     *
+     * @param array $messages Lista wiadomości [['role' => 'user|assistant', 'content' => 'treść']]
+     * @param string $model Model Claude
+     * @param int $max_tokens
+     * @param float $temperature
+     * @return array ['success' => bool, 'message' => string, 'tokens_used' => int]
      */
-    public function test_connection() {
+    public function send_message($messages, $model = 'claude-3-haiku-20240307', $max_tokens = 4000, $temperature = 0.7) {
         if (empty($this->api_key)) {
-            return false;
+            return [
+                'success' => false,
+                'message' => __('Klucz API Claude nie jest skonfigurowany.', 'claude-chat-pro')
+            ];
         }
-
-        try {
-            $response = wp_remote_post(
-                $this->api_base_url . '/messages',
-                [
-                    'headers' => [
-                        'x-api-key' => $this->api_key,
-                        'anthropic-version' => '2023-06-01',
-                        'Content-Type' => 'application/json'
-                    ],
-                    'body' => json_encode([
-                        'model' => 'claude-3-haiku-20240307',
-                        'messages' => [
-                            ['role' => 'user', 'content' => 'Test']
-                        ],
-                        'max_tokens' => 10
-                    ]),
-                    'timeout' => 15
-                ]
-            );
-
-            if (is_wp_error($response)) {
-                return false;
-            }
-
-            $status_code = wp_remote_retrieve_response_code($response);
-            return $status_code === 200;
-            
-        } catch (\Exception $e) {
-            return false;
-        }
-    }
-
-    /**
-     * Pobieranie dostępnych modeli
-     */
-    public function fetch_available_models() {
-        // Ustawione domyślne modele Claude
-        $this->available_models = [
-            ['id' => 'claude-3-5-sonnet-20241022', 'name' => 'Claude 3.5 Sonnet'],
-            ['id' => 'claude-3-5-haiku-20241022', 'name' => 'Claude 3.5 Haiku'],
-            ['id' => 'claude-3-opus-20240229', 'name' => 'Claude 3 Opus'],
-            ['id' => 'claude-3-sonnet-20240229', 'name' => 'Claude 3 Sonnet'],
-            ['id' => 'claude-3-haiku-20240307', 'name' => 'Claude 3 Haiku']
-        ];
-
-        update_option('claude_available_models', $this->available_models);
-        update_option('claude_models_last_update', current_time('mysql', true));
-    }
-
-    /**
-     * Wysyłanie wiadomości do API Claude
-     */
-    public function send_message($message, $attachments = [], $model = null) {
-        if (empty($this->api_key)) {
-            throw new \Exception(__('Klucz API Claude nie został skonfigurowany', 'claude-chat-pro'));
-        }
-
-        if (!$model) {
-            $model = $this->get_default_model();
-        }
-
-        $messages = $this->prepare_messages($message, $attachments);
 
         $data = [
             'model' => $model,
             'messages' => $messages,
-            'max_tokens' => 4096,
-            'temperature' => 0.7,
+            'max_tokens' => $max_tokens,
+            'temperature' => $temperature
         ];
 
         $response = wp_remote_post(
-            $this->api_base_url . '/messages',
+            $this->api_url,
             [
                 'headers' => [
+                    'Content-Type' => 'application/json',
                     'x-api-key' => $this->api_key,
-                    'anthropic-version' => '2023-06-01',
-                    'Content-Type' => 'application/json'
+                    'anthropic-version' => $this->api_version
                 ],
                 'body' => json_encode($data),
                 'timeout' => 60
@@ -105,82 +52,152 @@ class Claude_Api {
         );
 
         if (is_wp_error($response)) {
-            throw new \Exception($response->get_error_message());
+            return [
+                'success' => false,
+                'message' => $response->get_error_message()
+            ];
         }
 
+        $response_code = wp_remote_retrieve_response_code($response);
         $body = json_decode(wp_remote_retrieve_body($response), true);
 
-        if (isset($body['error'])) {
-            throw new \Exception($body['error']['message'] ?? __('Błąd API Claude', 'claude-chat-pro'));
+        if ($response_code !== 200) {
+            $error_message = isset($body['error']['message'])
+                ? $body['error']['message']
+                : __('Wystąpił błąd podczas komunikacji z API Claude.', 'claude-chat-pro');
+            return [
+                'success' => false,
+                'message' => $error_message
+            ];
         }
 
-        return $this->format_response($body);
+        return [
+            'success' => true,
+            'message' => $body['content'][0]['text'] ?? '',
+            'tokens_used' => $body['usage']['output_tokens'] ?? 0
+        ];
     }
 
     /**
-     * Pobieranie listy dostępnych modeli
+     * Testuje połączenie z API Claude
+     *
+     * @return bool Czy połączenie działa
      */
-    public function get_available_models() {
-        $last_update = get_option('claude_models_last_update');
-        if ($last_update) {
-            $diff = strtotime(current_time('mysql', true)) - strtotime($last_update);
-            if ($diff > 24 * HOUR_IN_SECONDS) {
-                $this->fetch_available_models();
-            }
-        }
-
-        return $this->available_models;
-    }
-
-    /**
-     * Pobieranie domyślnego modelu
-     */
-    private function get_default_model() {
-        $default_model = get_option('claude_default_model');
-        if (!$default_model) {
-            $models = $this->get_available_models();
-            $default_model = !empty($models) ? $models[0]['id'] : 'claude-3-haiku-20240307';
-        }
-        return $default_model;
-    }
-
-    /**
-     * Przygotowanie wiadomości z załącznikami
-     */
-    private function prepare_messages($message, $attachments) {
-        $messages = [
+    public function test_connection() {
+        $test_messages = [
             [
                 'role' => 'user',
-                'content' => $message
+                'content' => 'Odpowiedz krótko: test połączenia'
             ]
         ];
 
-        if (!empty($attachments)) {
-            foreach ($attachments as $attachment) {
-                if ($attachment['type'] === 'file') {
-                    $messages[] = [
-                        'role' => 'user',
-                        'content' => "Zawartość pliku {$attachment['name']}:\n\n{$attachment['content']}"
-                    ];
-                } elseif ($attachment['type'] === 'github') {
-                    $messages[] = [
-                        'role' => 'user',
-                        'content' => "Kod z GitHub ({$attachment['name']}):\n\n{$attachment['content']}"
-                    ];
-                }
-            }
-        }
+        $response = $this->send_message($test_messages, 'claude-3-haiku-20240307', 20, 0.7);
 
-        return $messages;
+        return $response['success'];
     }
 
     /**
-     * Formatowanie odpowiedzi od API
+     * Pobiera dostępne modele Claude z API
+     *
+     * @return array Lista modeli [['id' => ..., 'display_name' => ...], ...]
      */
-    private function format_response($response) {
-        if (isset($response['content'][0]['text'])) {
-            return $response['content'][0]['text'];
+    public function get_available_models() {
+        if (empty($this->api_key)) {
+            return [];
         }
-        throw new \Exception(__('Nieprawidłowa odpowiedź od API', 'claude-chat-pro'));
+        $response = wp_remote_get('https://api.anthropic.com/v1/models', [
+            'headers' => [
+                'x-api-key' => $this->api_key,
+                'anthropic-version' => $this->api_version,
+                'content-type' => 'application/json',
+                'accept' => 'application/json'
+            ],
+            'timeout' => 30
+        ]);
+        if (is_wp_error($response)) {
+            return [];
+        }
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+        if (!isset($data['data']) || !is_array($data['data'])) {
+            return [];
+        }
+        // Zwracamy uproszczoną listę modeli
+        $models = [];
+        foreach ($data['data'] as $model) {
+            $models[] = [
+                'id' => $model['id'],
+                'display_name' => $model['display_name'] ?? $model['id']
+            ];
+        }
+        return $models;
+    }
+
+    /**
+     * Pobiera listę dostępnych modeli z API Claude.
+     * Zapisuje je w opcji 'claude_available_models'.
+     */
+    public function fetch_available_models() {
+        $response = wp_remote_get($this->api_base_url . '/models', [
+            'headers' => [
+                'x-api-key' => $this->api_key,
+                'anthropic-version' => '2023-06-01',
+                'content-type' => 'application/json',
+                'accept' => 'application/json'
+            ]
+        ]);
+
+        if (is_wp_error($response)) {
+            error_log('Claude API Error: ' . $response->get_error_message());
+            return;
+        }
+
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+
+        if (isset($data['data']) && is_array($data['data'])) {
+            $this->available_models = $data['data'];
+            update_option('claude_available_models', $this->available_models);
+        }
+    }
+
+    /**
+     * Uploads a file to Claude API (template for future API support).
+     * 
+     * @param string $file_path Path to the file to upload.
+     * @return array|WP_Error Response from API or error.
+     */
+    public function upload_file($file_path) {
+        if (!file_exists($file_path)) {
+            return new \WP_Error('file_not_found', 'File not found: ' . $file_path);
+        }
+
+        $boundary = wp_generate_password(24, false);
+        $headers = [
+            'x-api-key' => $this->api_key,
+            'anthropic-version' => '2023-06-01',
+            'content-type' => 'multipart/form-data; boundary=' . $boundary,
+            'accept' => 'application/json'
+        ];
+
+        $body = '';
+        $body .= '--' . $boundary . "\r\n";
+        $body .= 'Content-Disposition: form-data; name="file"; filename="' . basename($file_path) . '"' . "\r\n";
+        $body .= 'Content-Type: application/octet-stream' . "\r\n\r\n";
+        $body .= file_get_contents($file_path) . "\r\n";
+        $body .= '--' . $boundary . '--' . "\r\n";
+
+        $response = wp_remote_post($this->api_base_url . '/files', [
+            'headers' => $headers,
+            'body' => $body
+        ]);
+
+        if (is_wp_error($response)) {
+            error_log('Claude API Error: ' . $response->get_error_message());
+            return $response;
+        }
+
+        $body = wp_remote_retrieve_body($response);
+        return json_decode($body, true);
     }
 }

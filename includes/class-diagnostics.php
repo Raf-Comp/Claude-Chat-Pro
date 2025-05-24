@@ -1,6 +1,8 @@
 <?php
 namespace ClaudeChatPro\Includes;
 
+use ClaudeChatPro\Includes\Database\Settings_DB;
+
 class Diagnostics {
     private $required_php_version = '7.4.0';
     private $required_wp_version = '6.0.0';
@@ -11,7 +13,8 @@ class Diagnostics {
         global $wpdb;
         $this->plugin_tables = [
             $wpdb->prefix . 'claude_chat_history',
-            $wpdb->prefix . 'claude_chat_meta'
+            $wpdb->prefix . 'claude_chat_meta',
+            $wpdb->prefix . 'claude_chat_settings'
         ];
     }
 
@@ -140,17 +143,18 @@ class Diagnostics {
      
             try {
                 $claude_api = new \ClaudeChatPro\Includes\Api\Claude_Api();
-                $claude_status = $claude_api->test_connection();
+                $claude_result = $claude_api->test_connection();
+                $api_key = Settings_DB::get('claude_api_key', '');
                 
                 $connections['claude'] = [
                     'name' => 'Claude AI API',
-                    'status' => $claude_status,
-                    'message' => $claude_status ? 
-                        __('Połączenie aktywne', 'claude-chat-pro') : 
-                        __('Brak połączenia lub nieprawidłowy klucz API', 'claude-chat-pro'),
+                    'status' => isset($claude_result['status']) ? $claude_result['status'] : false,
+                    'message' => isset($claude_result['status']) && $claude_result['status']
+                        ? __('Połączenie aktywne', 'claude-chat-pro')
+                        : (isset($claude_result['error']) ? $claude_result['error'] : __('Błąd połączenia', 'claude-chat-pro')),
                     'last_tested' => current_time('mysql', true),
                     'endpoint' => 'https://api.anthropic.com/v1',
-                    'configured' => !empty(get_option('claude_api_key'))
+                    'configured' => !empty($api_key)
                 ];
             } catch (\Exception $e) {
                 $connections['claude'] = [
@@ -166,16 +170,16 @@ class Diagnostics {
             try {
                 $github_api = new \ClaudeChatPro\Includes\Api\Github_Api();
                 $github_status = $github_api->test_connection();
-                
+                $github_token = get_option('github_token');
                 $connections['github'] = [
                     'name' => 'GitHub API',
-                    'status' => $github_status,
-                    'message' => $github_status ? 
-                        __('Połączenie aktywne', 'claude-chat-pro') : 
-                        __('Brak połączenia lub nieprawidłowy token', 'claude-chat-pro'),
+                    'status' => is_array($github_status) && isset($github_status['status']) ? $github_status['status'] : (is_bool($github_status) ? $github_status : false),
+                    'message' => (is_array($github_status) && isset($github_status['status']) && $github_status['status']) || $github_status === true
+                        ? __('Połączenie aktywne', 'claude-chat-pro')
+                        : (is_array($github_status) && isset($github_status['error']) ? $github_status['error'] : __('Brak połączenia lub nieprawidłowy token', 'claude-chat-pro')),
                     'last_tested' => current_time('mysql', true),
                     'endpoint' => 'https://api.github.com',
-                    'configured' => !empty(get_option('github_token'))
+                    'configured' => !empty($github_token)
                 ];
             } catch (\Exception $e) {
                 $connections['github'] = [
@@ -217,41 +221,19 @@ class Diagnostics {
                 );
      
                 if ($exists) {
-                    // Sprawdź integralność tabeli
-                    $check_result = $wpdb->get_row("CHECK TABLE {$table}", ARRAY_A);
+                    // Pobierz liczbę rekordów
+                    $records = $wpdb->get_var("SELECT COUNT(*) FROM {$table}");
                     
-                    // Pobierz statystyki tabeli
-                    $stats = $wpdb->get_row(
-                        "SELECT 
-                            COUNT(*) as row_count,
-                            ROUND(((data_length + index_length) / 1024 / 1024), 2) as size_mb,
-                            data_length,
-                            index_length,
-                            auto_increment
-                        FROM information_schema.tables 
-                        WHERE table_schema = DATABASE() AND table_name = '{$table}'",
-                        ARRAY_A
-                    );
-     
                     $results[$table] = [
                         'exists' => true,
-                        'status' => $check_result['Msg_text'] === 'OK',
-                        'message' => $check_result['Msg_text'],
-                        'rows' => (int)$wpdb->get_var("SELECT COUNT(*) FROM {$table}"),
-                        'size' => $stats ? $stats['size_mb'] . ' MB' : '0 MB',
-                        'data_length' => $stats['data_length'] ?? 0,
-                        'index_length' => $stats['index_length'] ?? 0,
-                        'auto_increment' => $stats['auto_increment'] ?? null,
-                        'last_checked' => current_time('mysql', true)
+                        'records' => (int)$records,
+                        'status' => 'OK'
                     ];
                 } else {
                     $results[$table] = [
                         'exists' => false,
-                        'status' => false,
-                        'message' => __('Tabela nie istnieje', 'claude-chat-pro'),
-                        'rows' => 0,
-                        'size' => '0 MB',
-                        'recommendation' => __('Reaktywuj wtyczkę aby utworzyć tabelę', 'claude-chat-pro')
+                        'records' => 0,
+                        'status' => 'Missing'
                     ];
                 }
             }
@@ -380,21 +362,44 @@ class Diagnostics {
         public function export_tables_csv($table_name) {
             global $wpdb;
             
+            if ($table_name === 'all') {
+                // Eksportuj wszystkie tabele do jednego pliku CSV
+                $output = fopen('php://temp', 'r+');
+                foreach ($this->plugin_tables as $tbl) {
+                    $exists = $wpdb->get_var("SHOW TABLES LIKE '{$tbl}'");
+                    if (!$exists) continue;
+                    // Nagłówek z nazwą tabeli
+                    fputcsv($output, ["Tabela: $tbl"]);
+                    // Kolumny
+                    $columns = $wpdb->get_col("SHOW COLUMNS FROM {$tbl}");
+                    fputcsv($output, $columns);
+                    // Dane
+                    $rows = $wpdb->get_results("SELECT * FROM {$tbl}", ARRAY_N);
+                    foreach ($rows as $row) {
+                        fputcsv($output, $row);
+                    }
+                    fputcsv($output, []); // Pusta linia między tabelami
+                }
+                rewind($output);
+                $csv = stream_get_contents($output);
+                fclose($output);
+                return $csv;
+            }
             if (!in_array($table_name, $this->plugin_tables)) {
                 throw new \Exception(__('Nieprawidłowa nazwa tabeli', 'claude-chat-pro'));
             }
-     
+
             $exists = $wpdb->get_var("SHOW TABLES LIKE '{$table_name}'");
             if (!$exists) {
                 throw new \Exception(__('Tabela nie istnieje', 'claude-chat-pro'));
             }
-     
+
             $output = fopen('php://temp', 'r+');
-     
+
             // Pobierz nazwy kolumn
             $columns = $wpdb->get_col("SHOW COLUMNS FROM {$table_name}");
             fputcsv($output, $columns);
-     
+
             // Pobierz dane w paczkach aby nie przeciążyć pamięci
             $offset = 0;
             $limit = 1000;
@@ -411,11 +416,11 @@ class Diagnostics {
                 
                 $offset += $limit;
             } while (count($rows) === $limit);
-     
+
             rewind($output);
             $csv = stream_get_contents($output);
             fclose($output);
-     
+
             return $csv;
         }
      

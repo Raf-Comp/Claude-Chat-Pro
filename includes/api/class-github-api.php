@@ -7,10 +7,14 @@ class Github_Api {
     private $username;
     private $client_headers;
 
-    public function __construct() {
-        $encrypted_token = get_option('github_token');
-        $this->token = !empty($encrypted_token) ? 
-            \ClaudeChatPro\Includes\Security::decrypt($encrypted_token) : '';
+    public function __construct($token = null) {
+        if ($token !== null) {
+            $this->token = $token;
+        } else {
+            $encrypted_token = \ClaudeChatPro\Includes\Database\Settings_DB::get('claude_github_token', '');
+            $this->token = !empty($encrypted_token) ? 
+                \ClaudeChatPro\Includes\Security::decrypt($encrypted_token) : '';
+        }
         $this->username = get_option('github_username', '');
         $this->setup_headers();
     }
@@ -21,7 +25,7 @@ class Github_Api {
     private function setup_headers() {
         $this->client_headers = [
             'Accept' => 'application/vnd.github.v3+json',
-            'Authorization' => 'Bearer ' . $this->token,
+            'Authorization' => 'token ' . $this->token,
             'User-Agent' => 'Claude-Chat-Pro-WordPress-Plugin'
         ];
     }
@@ -31,7 +35,7 @@ class Github_Api {
      */
     public function test_connection() {
         if (empty($this->token)) {
-            return false;
+            return ['status' => false, 'error' => 'Token GitHub jest pusty.'];
         }
 
         try {
@@ -44,22 +48,30 @@ class Github_Api {
             );
 
             if (is_wp_error($response)) {
-                return false;
+                error_log('GitHub API WP Error: ' . $response->get_error_message());
+                return ['status' => false, 'error' => $response->get_error_message()];
             }
 
             $status_code = wp_remote_retrieve_response_code($response);
+            $body = wp_remote_retrieve_body($response);
+            $headers = wp_remote_retrieve_headers($response);
+            error_log('GitHub API response code: ' . $status_code);
+            error_log('GitHub API response body: ' . $body);
+            error_log('GitHub API response headers: ' . print_r($headers, true));
+
             if ($status_code === 200) {
-                $body = json_decode(wp_remote_retrieve_body($response), true);
-                if (isset($body['login'])) {
-                    update_option('github_username', $body['login']);
-                    $this->username = $body['login'];
-                    return true;
+                $body_arr = json_decode($body, true);
+                if (isset($body_arr['login'])) {
+                    update_option('github_username', $body_arr['login']);
+                    $this->username = $body_arr['login'];
+                    return ['status' => true];
                 }
             }
 
-            return false;
+            return ['status' => false, 'error' => 'Nieprawidłowa odpowiedź z API GitHub (kod: ' . $status_code . ')'];
         } catch (\Exception $e) {
-            return false;
+            error_log('GitHub API Exception: ' . $e->getMessage());
+            return ['status' => false, 'error' => $e->getMessage()];
         }
     }
 
@@ -89,10 +101,15 @@ class Github_Api {
 
             $repos = json_decode(wp_remote_retrieve_body($response), true);
 
-            if (!is_array($repos)) {
-                throw new \Exception(__('Nieprawidłowa odpowiedź z API GitHub', 'claude-chat-pro'));
+            if (!is_array($repos) || isset($repos['message'])) {
+                // Zwróć błąd z message, jeśli jest
+                $msg = isset($repos['message']) ? $repos['message'] : __('Nieprawidłowa odpowiedź z API GitHub', 'claude-chat-pro');
+                throw new \Exception($msg);
             }
-
+            // Jeśli $repos nie jest tablicą indeksowaną, zwróć pustą tablicę
+            if (array_values($repos) !== $repos) {
+                return [];
+            }
             return array_map(function($repo) {
                 return [
                     'id' => $repo['id'],
@@ -133,10 +150,14 @@ class Github_Api {
             );
 
             if (is_wp_error($response)) {
+                error_log('GitHub API error: ' . $response->get_error_message());
                 throw new \Exception($response->get_error_message());
             }
 
             $body = json_decode(wp_remote_retrieve_body($response), true);
+
+            // LOGUJEMY ODPOWIEDŹ Z GITHUBA
+            error_log('GitHub API response for file ' . $repo . '/' . $path . ': ' . print_r($body, true));
 
             if (!isset($body['content'])) {
                 throw new \Exception(__('Nie można pobrać zawartości pliku', 'claude-chat-pro'));
@@ -176,8 +197,10 @@ class Github_Api {
 
             $items = json_decode(wp_remote_retrieve_body($response), true);
 
-            if (!is_array($items)) {
-                throw new \Exception(__('Nieprawidłowa odpowiedź z API GitHub', 'claude-chat-pro'));
+            if (!is_array($items) || isset($items['message'])) {
+                // Zwróć błąd z message, jeśli jest
+                $msg = isset($items['message']) ? $items['message'] : __('Nieprawidłowa odpowiedź z API GitHub', 'claude-chat-pro');
+                throw new \Exception($msg);
             }
 
             return array_map(function($item) {
@@ -194,6 +217,45 @@ class Github_Api {
             throw new \Exception(
                 sprintf(
                     __('Błąd podczas pobierania struktury katalogu: %s', 'claude-chat-pro'),
+                    $e->getMessage()
+                )
+            );
+        }
+    }
+
+    /**
+     * Pobieranie branchy repozytorium
+     */
+    public function get_repository_branches($repo) {
+        try {
+            $url = $this->api_base_url . "/repos/{$repo}/branches";
+            $response = wp_remote_get(
+                $url,
+                ['headers' => $this->client_headers]
+            );
+
+            if (is_wp_error($response)) {
+                throw new \Exception($response->get_error_message());
+            }
+
+            $branches = json_decode(wp_remote_retrieve_body($response), true);
+
+            if (!is_array($branches) || isset($branches['message'])) {
+                $msg = isset($branches['message']) ? $branches['message'] : __('Nieprawidłowa odpowiedź z API GitHub', 'claude-chat-pro');
+                throw new \Exception($msg);
+            }
+
+            return array_map(function($branch) {
+                return [
+                    'name' => $branch['name'],
+                    'commit' => $branch['commit']['sha']
+                ];
+            }, $branches);
+
+        } catch (\Exception $e) {
+            throw new \Exception(
+                sprintf(
+                    __('Błąd podczas pobierania branchy: %s', 'claude-chat-pro'),
                     $e->getMessage()
                 )
             );
